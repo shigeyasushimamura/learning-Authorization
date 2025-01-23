@@ -28,6 +28,27 @@ interface RefreshTokenResponse {
   errors?: Record<string, unknown>;
 }
 
+interface initAuthResponse {
+  data?: {
+    isTokenRefreshed?: boolean;
+    oktaRequestUri?: string;
+    sessionId?: string;
+    idToken?: string;
+    accessToken?: string;
+    refreshToken?: string;
+  };
+  errors?: Record<string, unknown>;
+}
+
+interface RequestAuthResponse {
+  data?: {
+    idToken?: string;
+    accessToken?: string;
+    refreshToken?: string;
+  };
+  errors: Record<string, unknown>;
+}
+
 export class AuthClient {
   PROJECT_ID = "sample";
   authStore;
@@ -89,6 +110,7 @@ export class AuthClient {
     };
     let response;
     try {
+      // API Gateway内のリフレッシュトークン認証に成功しない場合(401など)はcatch句に入る
       response = await axios.post(
         `${this.authDomain}/refreshToken`,
         requestBody,
@@ -103,10 +125,69 @@ export class AuthClient {
       );
     } catch (error: unknown) {
       this.authStore.removeRefreshToken();
+
       if (error instanceof Error) {
         throw Error(
           `${error.message} \nリフレッシュトークンの更新に失敗しました`
         );
+      }
+    }
+    return {
+      errors: {},
+      ...response,
+    };
+  }
+
+  async confirmJwtAuthentication(): Promise<boolean | undefined> {
+    const _isAuthenticated = false;
+    const response = await this.initAuth();
+  }
+
+  async initAuth(): Promise<initAuthResponse> {
+    // 画面更新時だけでなく、画面切り替わり時にもIDトークン検証をする必要があるため、
+    // ここでもverifyTokenをする
+    const verify = this.verifyToken();
+
+    if (verify.status === HTTP_STATUS.UNAUTHORIZED) {
+      if (this.authStore.refreshToken !== undefined) {
+        const response = await this.refreshToken();
+        if (response.data) {
+          this.authStore.setRefreshResult(response.data);
+        }
+
+        return {
+          errors: {},
+          data: { isTokenRefreshed: true },
+        };
+      } else {
+        const authResponse = await this.requestAuth();
+        return authResponse;
+      }
+    } else {
+      return {
+        errors: {},
+        data: {},
+      };
+    }
+  }
+
+  async requestAuth(): Promise<RequestAuthResponse> {
+    const requestBody = {
+      redirectUri: this.redirectUri,
+      projectId: this.PROJECT_ID,
+    };
+    let response;
+    try {
+      response = await axios.post(`${this.authDomain}/auth`, requestBody, {
+        headers: {
+          apiKey: String(
+            process.env.REACT_APP_API_GATEWAY_API_KEY ?? "DUMMY_API_KEY"
+          ),
+        },
+      });
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        throw Error(`${error.message} \n認証要求でエラーが発生しました`);
       }
     }
     return {
