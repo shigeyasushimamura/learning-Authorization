@@ -37,6 +37,26 @@ export class AuthStore {
     Cookies.remove(this.REFRESH_TOKEN);
   }
 
+  setAuthResult(params: AuthResult): void {
+    if (params.accessToken !== undefined) {
+      setCookie(this.ACCESS_TOKEN, params.accessToken);
+    } else {
+      removeCookie(this.ACCESS_TOKEN);
+    }
+
+    if (params.idToken !== undefined) {
+      setCookie(this.ID_TOKEN, params.idToken);
+    } else {
+      removeCookie(this.ID_TOKEN);
+    }
+
+    if (params.refreshToken !== undefined) {
+      setCookie(this.REFRESH_TOKEN, params.refreshToken);
+    } else {
+      removeCookie(this.REFRESH_TOKEN);
+    }
+  }
+
   setRefreshResult(params: AuthResult): void {
     if (params.idToken !== undefined) {
       setCookie(this.ID_TOKEN, params.idToken);
@@ -49,5 +69,19 @@ export class AuthStore {
     } else {
       removeCookie(this.ACCESS_TOKEN);
     }
+  }
+
+  setSessionId(param: string | undefined): void {
+    if (param === undefined) {
+      removeCookie(this.SESSION_ID);
+      return;
+    }
+    setCookie(this.SESSION_ID, param);
+  }
+
+  clear(): void {
+    removeCookie(this.ACCESS_TOKEN);
+    removeCookie(this.ID_TOKEN);
+    removeCookie(this.REFRESH_TOKEN);
   }
 }

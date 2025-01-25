@@ -24,6 +24,8 @@ export const JWT_VERIFY_KEY = {
 interface RefreshTokenResponse {
   data?: {
     idToken?: string | undefined;
+    accessToken?: string | undefined;
+    refreshToken?: string | undefined;
   };
   errors?: Record<string, unknown>;
 }
@@ -31,7 +33,7 @@ interface RefreshTokenResponse {
 interface initAuthResponse {
   data?: {
     isTokenRefreshed?: boolean;
-    oktaRequestUri?: string;
+    requestUri?: string;
     sessionId?: string;
     idToken?: string;
     accessToken?: string;
@@ -95,12 +97,28 @@ export class AuthClient {
   }
 
   async getAccessToken(): Promise<string | undefined> {
-    const verify = this.verifyToken();
-    if (verify.status == HTTP_STATUS.OK) {
-      return this.authStore.accessToken;
-    }
+    try {
+      const verify = this.verifyToken();
+      if (verify.status == HTTP_STATUS.OK) {
+        return this.authStore.accessToken;
+      }
 
-    // const response = await this.refreshToken()
+      const response = await this.refreshToken();
+      const responseBody = response.data;
+
+      if (responseBody) {
+        this.authStore.setAuthResult(responseBody);
+      }
+
+      const _accessToken = this.authStore.accessToken;
+      if (_accessToken) {
+        return _accessToken;
+      }
+    } catch {
+      // 恐らくrefreshTokenで失敗してここに入るパターンになる
+      // 認証失敗してるので再認証処理に遷移
+      await this.confirmJwtAuthentication();
+    }
   }
 
   async refreshToken(): Promise<RefreshTokenResponse> {
@@ -111,6 +129,7 @@ export class AuthClient {
     let response;
     try {
       // API Gateway内のリフレッシュトークン認証に成功しない場合(401など)はcatch句に入る
+      // 成功した場合は<RefreshTokenResult>を返す
       response = await axios.post(
         `${this.authDomain}/refreshToken`,
         requestBody,
@@ -138,9 +157,48 @@ export class AuthClient {
     };
   }
 
+  async retryAuth(): Promise<initAuthResponse> {
+    const verify = this.verifyToken();
+    if (verify.status !== HTTP_STATUS.OK) {
+      const response = await this.refreshToken();
+      if (response.data) {
+        this.authStore.setRefreshResult(response.data);
+      }
+    }
+    return {
+      errors: {},
+      data: {},
+    };
+  }
+
   async confirmJwtAuthentication(): Promise<boolean | undefined> {
-    const _isAuthenticated = false;
-    const response = await this.initAuth();
+    try {
+      let _isAuthenticated = false;
+      const response = await this.initAuth();
+      if (response?.data?.isTokenRefreshed) {
+        await this.retryAuth();
+      }
+
+      if (response.data && Object.keys(response.data).length === 0) {
+        _isAuthenticated = true;
+      } else {
+        const sessionId = response?.data?.sessionId || "";
+        this.authStore.setSessionId(sessionId);
+        if (response?.data?.requestUri) {
+          window.location.replace(response.data.requestUri);
+        }
+      }
+
+      return _isAuthenticated;
+    } catch (e) {
+      if (e instanceof Error) {
+        throw Error(`${e.message} \nトークンの検証・認証処理に失敗しました`);
+      }
+    }
+  }
+
+  removeAllToken(): void {
+    this.authStore.clear();
   }
 
   async initAuth(): Promise<initAuthResponse> {
